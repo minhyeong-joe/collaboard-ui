@@ -1,4 +1,6 @@
-import { act, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { moveCursor, listenForCursorUpdates, cleanupListeners } from '../services/io';
+
 
 export interface Point {
     x: number;
@@ -15,13 +17,11 @@ export interface Stroke {
     timestamp: number;
 }
 
-// Data schema for users
-export interface User {
-    id: string;
-    name: string;
-    color: string;
-    cursor?: Point;
+interface RemoteCursorUpdate {
+    nickname: string;
+    point: Point;
 }
+
 
 interface CanvasProps {
     userId: string;
@@ -32,6 +32,10 @@ interface CanvasProps {
 
 export default function Canvas({ userId, userName, roomId, onStrokeComplete }: CanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const pendingCursorRef = useRef<Point | null>(null);
+    const sendRafRef = useRef<number | null>(null);
+    const pendingRemoteRef = useRef<Record<string, Point>>({});
+    const receiveRafRef = useRef<number | null>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [strokes, setStrokes] = useState<Stroke[]>([]);
     const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
@@ -41,6 +45,7 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
     const [activeTool, setActiveTool] = useState<'draw' | 'eraser'>('draw');
     const [mousePosition, setMousePosition] = useState<Point | null>(null);
     const [isHovering, setIsHovering] = useState(true);
+    const [remoteCursors, setRemoteCursors] = useState<Record<string, Point>>({});
 
     // Initialize canvas
     useEffect(() => {
@@ -61,8 +66,37 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
 
-        return () => window.removeEventListener('resize', resizeCanvas);
+        listenForCursorUpdates((data: RemoteCursorUpdate) => {
+            if (!data?.nickname || !data?.point) return;
+            if (data.nickname === userName) return;
+
+            pendingRemoteRef.current[data.nickname] = data.point;
+            if (receiveRafRef.current !== null) return;
+
+            receiveRafRef.current = requestAnimationFrame(() => {
+                receiveRafRef.current = null;
+                const batched = pendingRemoteRef.current;
+                pendingRemoteRef.current = {};
+
+                setRemoteCursors(prev => ({
+                    ...prev,
+                    ...batched,
+                }));
+            });
+        });
+
+        return () => {
+            window.removeEventListener('resize', resizeCanvas);
+            cleanupListeners();
+            if (sendRafRef.current !== null) {
+                cancelAnimationFrame(sendRafRef.current);
+            }
+            if (receiveRafRef.current !== null) {
+                cancelAnimationFrame(receiveRafRef.current);
+            }
+        };
     }, []);
+
 
     // Redraw all strokes on canvas
     const redrawCanvas = () => {
@@ -118,8 +152,8 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         redrawCanvas();
     }, [strokes, currentStroke, isDrawing]);
 
-    // Mouse event handlers
-    const getMousePos = (e: React.MouseEvent<HTMLCanvasElement>): Point => {
+    // Pointer event handlers (mouse, touch, pen)
+    const getPointerPos = (e: React.PointerEvent<HTMLCanvasElement>): Point => {
         const canvas = canvasRef.current;
         if (!canvas) return { x: 0, y: 0 };
 
@@ -130,8 +164,11 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         };
     };
 
-    const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const point = getMousePos(e);
+    const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        const point = getPointerPos(e);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setIsHovering(true);
 
         if (activeTool === 'eraser') {
             handleErase(point);
@@ -141,9 +178,20 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         }
     };
 
-    const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const point = getMousePos(e);
+    const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
+        const point = getPointerPos(e);
         setMousePosition(point);
+        pendingCursorRef.current = point;
+
+        if (sendRafRef.current === null) {
+            sendRafRef.current = requestAnimationFrame(() => {
+                sendRafRef.current = null;
+                if (pendingCursorRef.current) {
+                    moveCursor(roomId, userId, userName, pendingCursorRef.current);
+                }
+            });
+        }
 
         if (activeTool === 'eraser' && isDrawing) {
             handleErase(point);
@@ -152,13 +200,17 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         }
     };
 
-    const handleMouseEnter = () => {
-        setIsHovering(true);
+    const handlePointerEnter = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (e.pointerType === 'mouse') {
+            setIsHovering(true);
+        }
     };
 
-    const handleMouseLeaveCanvas = () => {
-        setIsHovering(false);
-        setMousePosition(null);
+    const handlePointerLeaveCanvas = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (e.pointerType === 'mouse') {
+            setIsHovering(false);
+            setMousePosition(null);
+        }
     };
 
     const handleErase = (point: Point) => {
@@ -186,9 +238,12 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         return stroke.points.some(p => isPointNear(point, p, threshold));
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        e.preventDefault();
         if (!isDrawing) return;
         setIsDrawing(false);
+        setIsHovering(false);
+        setMousePosition(null);
 
         if (activeTool === 'eraser') {
             // Don't create strokes for eraser
@@ -215,11 +270,13 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         }
     };
 
-    const handleMouseLeave = () => {
-        if (isDrawing) {
-            handleMouseUp();
+    const handlePointerLeave = (e: React.PointerEvent<HTMLCanvasElement>) => {
+        if (e.pointerType === 'mouse') {
+            handlePointerLeaveCanvas(e);
         }
-        handleMouseLeaveCanvas();
+        if (isDrawing) {
+            handlePointerUp(e);
+        }
     };
 
     const clearCanvas = () => {
@@ -308,15 +365,18 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
             <div className="flex-1 relative bg-white overflow-hidden">
                 <canvas
                     ref={canvasRef}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    onMouseEnter={handleMouseEnter}
-                    onMouseLeave={handleMouseLeave}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerEnter={handlePointerEnter}
+                    onPointerLeave={handlePointerLeave}
                     className={`absolute inset-0 w-full h-full ${activeTool === 'eraser' ? 'cursor-cell' : 'cursor-crosshair'}`}
-                    style={activeTool === 'eraser' ? { 
-                        cursor: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='${width * 2 + 4}' height='${width * 2 + 4}' viewBox='0 0 ${width * 2 + 4} ${width * 2 + 4}'><circle cx='${width + 2}' cy='${width + 2}' r='${width}' fill='none' stroke='black' stroke-width='1'/></svg>") ${width + 2} ${width + 2}, auto` 
-                    } : undefined}
+                    style={{
+                        touchAction: 'none',
+                        ...(activeTool === 'eraser' ? {
+                            cursor: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='${width * 2 + 4}' height='${width * 2 + 4}' viewBox='0 0 ${width * 2 + 4} ${width * 2 + 4}'><circle cx='${width + 2}' cy='${width + 2}' r='${width}' fill='none' stroke='black' stroke-width='1'/></svg>") ${width + 2} ${width + 2}, auto`
+                        } : {})
+                    }}
                 />
                 
                 {/* Current user's nickname label */}
@@ -335,12 +395,21 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
                     </div>
                 )}
                 
-                {/* TODO: When socket is wired up, map over other users' cursors and nicknames */}
-                {/* {otherUsers.map(user => user.cursor && (
-                    <div key={user.id} className="absolute pointer-events-none" style={{ left: user.cursor.x, top: user.cursor.y + 20 }}>
-                        <div className="bg-black/75 text-white text-xs px-2 py-1 rounded">{user.name}</div>
+                {Object.entries(remoteCursors).map(([nickname, point]) => (
+                    <div
+                        key={nickname}
+                        className="absolute pointer-events-none"
+                        style={{ left: point.x, top: point.y }}
+                    >
+                        <div className="relative translate-x -translate-y-4">
+                            <div className="absolute left-1/2 top-1/2 w-4 h-px bg-black/80 -translate-x-1/2 -translate-y-1/2" />
+                            <div className="absolute left-1/2 top-1/2 h-4 w-px bg-black/80 -translate-x-1/2 -translate-y-1/2" />
+                        </div>
+                        <div className="bg-black/75 text-white text-xs px-2 py-1 rounded">
+                            {nickname}
+                        </div>
                     </div>
-                ))} */}
+                ))}
             </div>
         </div>
     );

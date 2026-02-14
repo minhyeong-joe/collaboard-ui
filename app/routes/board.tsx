@@ -118,6 +118,7 @@ export default function Board({ params }: Route.ComponentProps) {
                     userName={nickname}
                     roomId={params.roomId}
                     onStrokeComplete={handleStrokeComplete}
+                    participants={participants}
                 />
             </div>
         </div>

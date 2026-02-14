@@ -31,6 +31,14 @@ const listenForRoomDeleted = (callback: (data: any) => void) => {
     socket.on(EVENTS.ROOM_DELETED, callback);
 }
 
+const moveCursor = (roomId: string, userId: string, nickname: string, point: { x: number; y: number }) => {
+    socket.emit(EVENTS.CURSOR_MOVE, { roomId, userId, nickname, point });
+}
+
+const listenForCursorUpdates = (callback: (data: any) => void) => {
+    socket.on(EVENTS.CURSOR_UPDATE, callback);
+}
+
 const completeStroke = (roomId: string, stroke: any) => {
     socket.emit(EVENTS.DRAW, { roomId, stroke });
 }
@@ -44,8 +52,9 @@ const cleanupListeners = () => {
     socket.off(EVENTS.USER_LEFT);
     socket.off(EVENTS.STROKE_DRAWN);
     socket.off(EVENTS.ROOM_DELETED);
+    socket.off(EVENTS.CURSOR_UPDATE);
 }
 
 export default socket;
 
-export { createRoom, joinRoom, leaveRoom, completeStroke, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted };
+export { createRoom, joinRoom, leaveRoom, completeStroke, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted, moveCursor, listenForCursorUpdates };
