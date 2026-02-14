@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useUser } from "../contexts/UserContext";
 import './home.css';
+import { joinRoom, createRoom } from "../services/io";
 
 export function meta({ }: Route.MetaArgs) {
   return [
@@ -12,7 +13,7 @@ export function meta({ }: Route.MetaArgs) {
 }
 
 export default function Home() {
-  const { nickname, setNickname, markVisited, isFirstVisit } = useUser();
+  const { userId, nickname, setNickname, markVisited, isFirstVisit } = useUser();
   const [roomId, setRoomId] = useState("");
   const [errors, setErrors] = useState<{ nickname?: string; roomId?: string }>({});
   const navigate = useNavigate();
@@ -44,8 +45,10 @@ export default function Home() {
     }
     setNickname(nickname.trim());
 
-    // TODO: create new socket room and navigate to board with room ID
-    navigate("/test");
+    const newRoomId = Math.random().toString(36).substring(2, 8); // generate random 6 character room ID
+    createRoom(newRoomId, userId, nickname, (data) => {
+      navigate(`/${newRoomId}`, { state: { roomInfo: data } });
+    });
   }
 
   const joinBoard = () => {
@@ -60,14 +63,13 @@ export default function Home() {
     }
     setNickname(nickname.trim());
 
-    // TODO: check if socket id exists and navigate to board if valid
-    // otherwise set error
-    // simulate invalid room id
-    if (roomId.trim() === "invalid") {
-      setErrors(prev => ({ ...prev, roomId: "Board not found. Please check the code and try again." }));
-      return;
-    }
-    navigate(`/${roomId}`);
+    joinRoom(roomId, userId, nickname, (response) => {
+      if (response.success) {
+        navigate(`/${roomId}`, { state: { roomInfo: response.data } });
+      } else {
+        setErrors(prev => ({ ...prev, roomId: response.error }));
+      }
+    });
   }
 
   return (
