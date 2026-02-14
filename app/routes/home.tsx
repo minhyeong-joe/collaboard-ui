@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { useUser } from "../contexts/UserContext";
 import './home.css';
-import { joinRoom, createRoom } from "../services/io";
+import socket, { joinRoom, createRoom } from "../services/io";
 
 export function meta({ }: Route.MetaArgs) {
   return [
@@ -16,11 +16,34 @@ export default function Home() {
   const { userId, nickname, setNickname, markVisited, isFirstVisit } = useUser();
   const [roomId, setRoomId] = useState("");
   const [errors, setErrors] = useState<{ nickname?: string; roomId?: string }>({});
+  const [isSocketReady, setIsSocketReady] = useState(isFirstVisit ? false : socket.connected);
+  const shouldAnimate = isFirstVisit;
   const navigate = useNavigate();
 
   useEffect(() => {
     markVisited();
   }, []);
+
+  useEffect(() => {
+    const handleConnect = () => setIsSocketReady(true);
+    const handleDisconnect = () => setIsSocketReady(false);
+
+    // Only listen to socket events if not already connected or first visit
+    if (isFirstVisit || !socket.connected) {
+      socket.on("connect", handleConnect);
+      socket.on("disconnect", handleDisconnect);
+    }
+
+    // Trigger connection check on mount
+    if (socket.connected) {
+      handleConnect();
+    }
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+    };
+  }, [isFirstVisit]);
 
   useEffect(() => {
     setNickname(nickname);
@@ -75,10 +98,14 @@ export default function Home() {
   return (
     <main className="w-full bg-cyan-400 font-bold h-screen overflow-y-auto">
       <div className="min-h-screen flex flex-col items-center justify-center py-8 relative">
-        <h1 className={`title text-white text-center text-4xl sm:text-5xl whitespace-nowrap ${!isFirstVisit ? "no-animation" : ""}`}>
+        <h1 className={`title text-white text-center text-4xl sm:text-5xl whitespace-nowrap ${shouldAnimate && isSocketReady ? "animate" : shouldAnimate ? "wait" : ""}`}>
           Collaboard
         </h1>
-        <div className={`main-contents mx-auto text-md text-white w-full max-w-md px-4 mt-20 ${!isFirstVisit ? "no-animation" : ""}`}>
+        {shouldAnimate && !isSocketReady && (
+          <div className="mt-4 text-white/80 text-sm">Connecting...</div>
+        )}
+        {isSocketReady && (
+        <div className={`main-contents mx-auto text-md text-white w-full max-w-md px-4 mt-20 ${shouldAnimate ? "animate" : ""}`}>
 
           <div className="section-card bg-white/10 backdrop-blur-sm rounded-lg p-6 border border-white/20 shadow-lg">
             <div className="flex items-center gap-2 mb-4">
@@ -138,6 +165,7 @@ export default function Home() {
             </button>
           </div>
         </div>
+        )}
       </div>
     </main>
   );

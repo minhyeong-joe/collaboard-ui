@@ -1,20 +1,17 @@
 .title {
+  transform: translateY(0) scale(1);
+}
+
+.title.animate {
   animation: titleAnimation 2.5s ease-in-out forwards;
 }
 
-.title.no-animation {
-  animation: none;
-}
-
 .main-contents {
-  animation: contentScaleUp 2.5s ease-in-out forwards;
   position: relative;
 }
 
-.main-contents.no-animation {
-  animation: none;
-  opacity: 1;
-  transform: scale(1);
+.main-contents.animate {
+  animation: contentScaleUp 2.5s ease-in-out forwards;
 }
 
 input:focus-visible {
@@ -25,7 +22,7 @@ input:focus-visible {
 
 @keyframes titleAnimation {
   0% {
-    transform: translateY(30vh) scale(1);
+    transform: translateY(40vh) scale(1);
   }
   50% {
     transform: translateY(30vh) scale(1.5);
