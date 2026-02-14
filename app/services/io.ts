@@ -47,14 +47,23 @@ const listenForStrokes = (callback: (data: any) => void) => {
     socket.on(EVENTS.STROKE_DRAWN, callback);
 }
 
+const deleteStroke = (roomId: string, strokeId: string, userId: string) => {
+    socket.emit(EVENTS.STROKE_DELETE, { roomId, strokeId, userId });
+}
+
+const listenForStrokeDeletes = (callback: (data: any) => void) => {
+    socket.on(EVENTS.STROKE_DELETED, callback);
+}
+
 const cleanupListeners = () => {
     socket.off(EVENTS.USER_JOINED);
     socket.off(EVENTS.USER_LEFT);
     socket.off(EVENTS.STROKE_DRAWN);
+    socket.off(EVENTS.STROKE_DELETED);
     socket.off(EVENTS.ROOM_DELETED);
     socket.off(EVENTS.CURSOR_UPDATE);
 }
 
 export default socket;
 
-export { createRoom, joinRoom, leaveRoom, completeStroke, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted, moveCursor, listenForCursorUpdates };
+export { createRoom, joinRoom, leaveRoom, completeStroke, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted, moveCursor, listenForCursorUpdates, deleteStroke, listenForStrokeDeletes };

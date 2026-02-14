@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { moveCursor, listenForCursorUpdates, cleanupListeners } from '../services/io';
+import { moveCursor, listenForCursorUpdates, cleanupListeners, listenForStrokes, deleteStroke, listenForStrokeDeletes } from '../services/io';
 
 
 export interface Point {
@@ -28,14 +28,18 @@ interface CanvasProps {
     userName: string;
     roomId: string;
     onStrokeComplete?: (stroke: Stroke) => void;
+    initialStrokes?: Stroke[];
+    ownerId?: string;
 }
 
-export default function Canvas({ userId, userName, roomId, onStrokeComplete }: CanvasProps) {
+export default function Canvas({ userId, userName, roomId, onStrokeComplete, initialStrokes, ownerId }: CanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pendingCursorRef = useRef<Point | null>(null);
     const sendRafRef = useRef<number | null>(null);
     const pendingRemoteRef = useRef<Record<string, Point>>({});
     const receiveRafRef = useRef<number | null>(null);
+    const pendingStrokeRef = useRef<Stroke | null>(null);
+    const receiveStrokeRafRef = useRef<number | null>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [strokes, setStrokes] = useState<Stroke[]>([]);
     const [currentStroke, setCurrentStroke] = useState<Point[]>([]);
@@ -46,6 +50,13 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
     const [mousePosition, setMousePosition] = useState<Point | null>(null);
     const [isHovering, setIsHovering] = useState(true);
     const [remoteCursors, setRemoteCursors] = useState<Record<string, Point>>({});
+    const isOwner = Boolean(ownerId && ownerId === userId);
+
+    useEffect(() => {
+        if (initialStrokes && initialStrokes.length > 0) {
+            setStrokes(initialStrokes);
+        }
+    }, [initialStrokes]);
 
     // Initialize canvas
     useEffect(() => {
@@ -85,6 +96,29 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
             });
         });
 
+        listenForStrokes((data) => {
+            if (!data?.stroke) return;
+            if (data.stroke.userId === userId) return; // Ignore own strokes
+            pendingStrokeRef.current = data.stroke;
+            if (receiveStrokeRafRef.current !== null) return;
+
+            receiveStrokeRafRef.current = requestAnimationFrame(() => {
+                receiveStrokeRafRef.current = null;
+                if (pendingStrokeRef.current) {
+                    setStrokes(prev => [...prev, pendingStrokeRef.current]);
+                }
+            });
+        });
+
+        listenForStrokeDeletes((data) => {
+            if (Array.isArray(data?.strokes)) {
+                setStrokes(data.strokes);
+                return;
+            }
+            if (!data?.strokeId) return;
+            setStrokes(prev => prev.filter(stroke => stroke.id !== data.strokeId));
+        });
+
         return () => {
             window.removeEventListener('resize', resizeCanvas);
             cleanupListeners();
@@ -93,6 +127,9 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
             }
             if (receiveRafRef.current !== null) {
                 cancelAnimationFrame(receiveRafRef.current);
+            }
+            if (receiveStrokeRafRef.current !== null) {
+                cancelAnimationFrame(receiveStrokeRafRef.current);
             }
         };
     }, []);
@@ -220,7 +257,11 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         );
 
         if (strokeToDelete) {
+            if (strokeToDelete.userId !== userId && !isOwner) {
+                return;
+            }
             setStrokes(prev => prev.filter(s => s.id !== strokeToDelete.id));
+            deleteStroke(roomId, strokeToDelete.id, userId);
         }
         
         setIsDrawing(true);
@@ -242,8 +283,10 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
         e.preventDefault();
         if (!isDrawing) return;
         setIsDrawing(false);
-        setIsHovering(false);
-        setMousePosition(null);
+        if (e.pointerType !== 'mouse') {
+            setIsHovering(false);
+            setMousePosition(null);
+        }
 
         if (activeTool === 'eraser') {
             // Don't create strokes for eraser
@@ -280,8 +323,13 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
     };
 
     const clearCanvas = () => {
-        setStrokes([]);
+        if (isOwner) {
+            setStrokes([]);
+        } else {
+            setStrokes(prev => prev.filter(stroke => stroke.userId !== userId));
+        }
         setCurrentStroke([]);
+        deleteStroke(roomId, 'all', userId);
     };
 
     return (
@@ -401,11 +449,11 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete }: C
                         className="absolute pointer-events-none"
                         style={{ left: point.x, top: point.y }}
                     >
-                        <div className="relative translate-x -translate-y-4">
+                        <div className="relative -translate-x-1/2 -translate-y-1/2">
                             <div className="absolute left-1/2 top-1/2 w-4 h-px bg-black/80 -translate-x-1/2 -translate-y-1/2" />
                             <div className="absolute left-1/2 top-1/2 h-4 w-px bg-black/80 -translate-x-1/2 -translate-y-1/2" />
                         </div>
-                        <div className="bg-black/75 text-white text-xs px-2 py-1 rounded">
+                        <div className="bg-black/75 -translate-x-5 translate-y-4 text-white text-xs px-2 py-1 rounded">
                             {nickname}
                         </div>
                     </div>

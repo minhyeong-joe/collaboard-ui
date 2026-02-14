@@ -1,11 +1,11 @@
 import type { Route } from "./+types/board";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { toast } from "react-hot-toast";
 
 import { useUser } from "../contexts/UserContext";
 import Canvas, { type Stroke } from "../components/Canvas";
-import { completeStroke, leaveRoom, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted } from "../services/io";
+import { completeStroke, leaveRoom, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted } from "../services/io";
 
 export function meta({ params }: Route.MetaArgs) {
     return [
@@ -15,10 +15,16 @@ export function meta({ params }: Route.MetaArgs) {
 }
 
 export default function Board({ params }: Route.ComponentProps) {
+    // State to manage room info and participants
     const [isRoomIdVisible, setIsRoomIdVisible] = useState(false);
     const [participants, setParticipants] = useState<any[]>([]);
     const [ownerName, setOwnerName] = useState<string>("");
+    const [ownerId, setOwnerId] = useState<string>("");
+    const [strokes, setStrokes] = useState<Stroke[]>([]);
     const { userId, nickname } = useUser();
+    // rate limiting
+    const pendingStrokeRef = useRef<Stroke | null>(null);
+    const sendRafRef = useRef<number | null>(null);
     const navigate = useNavigate();
     const location = useLocation();
     const roomInfo = location.state?.roomInfo;
@@ -28,6 +34,9 @@ export default function Board({ params }: Route.ComponentProps) {
         
         setParticipants(roomInfo.users);
         setOwnerName(roomInfo.owner);
+        const creatorId = roomInfo.ownerId || roomInfo.users?.find((user: any) => user.isCreator)?.userId || "";
+        setOwnerId(creatorId);
+        setStrokes(roomInfo.strokes || []);
         
         listenForUserJoined((data) => {
             console.log('User joined:', data);
@@ -50,6 +59,10 @@ export default function Board({ params }: Route.ComponentProps) {
 
         return () => {
             cleanupListeners();
+            
+            if (sendRafRef.current !== null) {
+                cancelAnimationFrame(sendRafRef.current);
+            }
         }
     }, [roomInfo])
 
@@ -80,7 +93,16 @@ export default function Board({ params }: Route.ComponentProps) {
 
     // Handler for when a stroke is completed - will emit to socket
     const handleStrokeComplete = (stroke: Stroke) => {
-        console.log('Stroke completed:', stroke);
+        pendingStrokeRef.current = stroke;
+        if (sendRafRef.current === null) {
+            sendRafRef.current = requestAnimationFrame(() => {
+                sendRafRef.current = null;
+                if (pendingStrokeRef.current) {
+                    console.log('Stroke completed:', pendingStrokeRef.current);
+                    completeStroke(params.roomId, pendingStrokeRef.current);
+                }
+            });
+        }
     };
 
     const handleLeaveBoard = () => {
@@ -118,7 +140,8 @@ export default function Board({ params }: Route.ComponentProps) {
                     userName={nickname}
                     roomId={params.roomId}
                     onStrokeComplete={handleStrokeComplete}
-                    participants={participants}
+                    initialStrokes={strokes}
+                    ownerId={ownerId}
                 />
             </div>
         </div>
