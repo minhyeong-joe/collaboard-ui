@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { moveCursor, listenForCursorUpdates, cleanupListeners, listenForStrokes, deleteStroke, listenForStrokeDeletes } from '../services/io';
+import { moveCursor, listenForCursorUpdates, cleanupListeners, listenForStrokes, deleteStroke, listenForStrokeDeletes, listenForUserLeft } from '../services/io';
 
 
 export interface Point {
@@ -117,6 +117,15 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete, ini
             }
             if (!data?.strokeId) return;
             setStrokes(prev => prev.filter(stroke => stroke.id !== data.strokeId));
+        });
+
+        listenForUserLeft((data) => {
+            if (!data?.nickname) return;
+            setRemoteCursors(prev => {
+                const updated = { ...prev };
+                delete updated[data.nickname];
+                return updated;
+            });
         });
 
         return () => {
