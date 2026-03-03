@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { moveCursor, listenForCursorUpdates, cleanupListeners, listenForStrokes, deleteStroke, listenForStrokeDeletes, listenForUserLeft } from '../services/io';
+import { moveCursor, listenForCursorUpdates, cleanupListeners, listenForStrokes, deleteStroke, listenForStrokeDeletes, listenForUserLeft, listenForUserDisconnected } from '../services/io';
 
 
 export interface Point {
@@ -38,7 +38,7 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete, ini
     const sendRafRef = useRef<number | null>(null);
     const pendingRemoteRef = useRef<Record<string, Point>>({});
     const receiveRafRef = useRef<number | null>(null);
-    const pendingStrokeRef = useRef<Stroke | null>(null);
+    const pendingStrokesRef = useRef<Stroke[]>([]);
     const receiveStrokeRafRef = useRef<number | null>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -96,19 +96,32 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete, ini
             });
         });
 
+        const flushPendingStrokes = () => {
+            const batch = pendingStrokesRef.current;
+            if (batch.length === 0) return;
+            pendingStrokesRef.current = [];
+            if (receiveStrokeRafRef.current !== null) {
+                cancelAnimationFrame(receiveStrokeRafRef.current);
+                receiveStrokeRafRef.current = null;
+            }
+            setStrokes(prev => [...prev, ...batch]);
+        };
+
         listenForStrokes((data) => {
             if (!data?.stroke) return;
-            if (data.stroke.userId === userId) return; // Ignore own strokes
-            pendingStrokeRef.current = data.stroke;
+            if (data.stroke.userId === userId) return;
+            pendingStrokesRef.current.push(data.stroke);
             if (receiveStrokeRafRef.current !== null) return;
-
             receiveStrokeRafRef.current = requestAnimationFrame(() => {
                 receiveStrokeRafRef.current = null;
-                if (pendingStrokeRef.current) {
-                    setStrokes(prev => [...prev, pendingStrokeRef.current]);
-                }
+                flushPendingStrokes();
             });
         });
+
+        const handleVisibilityChange = () => {
+            if (!document.hidden) flushPendingStrokes();
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         listenForStrokeDeletes((data) => {
             if (Array.isArray(data?.strokes)) {
@@ -128,8 +141,18 @@ export default function Canvas({ userId, userName, roomId, onStrokeComplete, ini
             });
         });
 
+        listenForUserDisconnected((data) => {
+            if (!data?.nickname) return;
+            setRemoteCursors(prev => {
+                const updated = { ...prev };
+                delete updated[data.nickname];
+                return updated;
+            });
+        });
+
         return () => {
             window.removeEventListener('resize', resizeCanvas);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             cleanupListeners();
             if (sendRafRef.current !== null) {
                 cancelAnimationFrame(sendRafRef.current);

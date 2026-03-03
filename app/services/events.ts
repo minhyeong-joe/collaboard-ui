@@ -17,4 +17,9 @@ export const EVENTS = {
     STROKE_DRAWN: 'strokeDrawn',    // server broadcasts to room participants
     STROKE_DELETE: 'strokeDelete',  // client emits when deleting a stroke
     STROKE_DELETED: 'strokeDeleted', // server broadcasts to room participants
+
+    // Reconnection
+    RECONNECT_ROOM: 'reconnectRoom',
+    USER_RECONNECTED: 'userReconnected',
+    USER_DISCONNECTED: 'userDisconnected',
 };

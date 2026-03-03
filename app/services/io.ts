@@ -55,6 +55,18 @@ const listenForStrokeDeletes = (callback: (data: any) => void) => {
     socket.on(EVENTS.STROKE_DELETED, callback);
 }
 
+const reconnectRoom = (roomId: string, userId: string, nickname: string, callback: (response: { success: boolean; error?: string; data?: any }) => void) => {
+    socket.emit(EVENTS.RECONNECT_ROOM, { roomId, userId, nickname }, callback);
+}
+
+const listenForUserDisconnected = (callback: (data: any) => void) => {
+    socket.on(EVENTS.USER_DISCONNECTED, callback);
+}
+
+const listenForUserReconnected = (callback: (data: any) => void) => {
+    socket.on(EVENTS.USER_RECONNECTED, callback);
+}
+
 const cleanupListeners = () => {
     socket.off(EVENTS.USER_JOINED);
     socket.off(EVENTS.USER_LEFT);
@@ -62,8 +74,10 @@ const cleanupListeners = () => {
     socket.off(EVENTS.STROKE_DELETED);
     socket.off(EVENTS.ROOM_DELETED);
     socket.off(EVENTS.CURSOR_UPDATE);
+    socket.off(EVENTS.USER_DISCONNECTED);
+    socket.off(EVENTS.USER_RECONNECTED);
 }
 
 export default socket;
 
-export { createRoom, joinRoom, leaveRoom, completeStroke, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted, moveCursor, listenForCursorUpdates, deleteStroke, listenForStrokeDeletes };
+export { createRoom, joinRoom, leaveRoom, completeStroke, listenForStrokes, listenForUserJoined, listenForUserLeft, cleanupListeners, listenForRoomDeleted, moveCursor, listenForCursorUpdates, deleteStroke, listenForStrokeDeletes, reconnectRoom, listenForUserDisconnected, listenForUserReconnected };
